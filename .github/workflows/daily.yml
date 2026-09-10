@@ -2,12 +2,14 @@ name: Daily Fitness Bot
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 매일 아침 9시 자동 실행 (한국시간 기준)
-  workflow_dispatch: # 수동으로 즉시 실행해볼 수 있는 버튼 생성
+    - cron: '0 0 * * *'
+  workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # 요약 웹페이지 파일 생성을 위한 권한 부여
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
@@ -18,4 +20,12 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: python main.py
+      - name: Commit and Push Summary Page
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add summary.html
+          git commit -m "Update daily summary HTML" || exit 0
+          git push
