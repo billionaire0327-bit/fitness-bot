@@ -2,6 +2,7 @@ import os
 import requests
 import feedparser
 import re
+from deep_translator import GoogleTranslator
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -26,52 +27,41 @@ def clean_text(html_text):
 
 def safe_translate(text):
     if not text:
-        return "제목 정보 없음"
-    
+        return "내용 없음"
     try:
-        url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            "client": "gtx",
-            "sl": "auto",
-            "tl": "ko",
-            "dt": "t",
-            "q": text[:400]
-        }
-        res = requests.get(url, params=params, timeout=5)
-        if res.status_code == 200:
-            result = res.json()
-            translated = "".join([item[0] for item in result[0] if item[0]])
-            if "Error" not in translated:
-                return translated
-    except Exception:
-        pass
-        
-    return text[:100]
+        # deep-translator를 사용한 안정적인 구글 번역
+        translated = GoogleTranslator(source='auto', target='ko').translate(text[:400])
+        if "Error" not in translated:
+            return translated
+    except Exception as e:
+        print(f"번역 오류: {e}")
+    return text[:150]
 
 def fetch_hypertrophy_data():
-    # 차단 위험이 낮고 안정한 글로벌 근력/운동 연구 RSS 피드
+    # 헬스, 근성장, 운동 과학에 특화된 RSS
     rss_urls = [
+        "https://www.sciencedaily.com/rss/top/sports.xml",
         "https://journals.plos.org/plosone/feed/atom?term=resistance+training",
-        "https://www.biomedcentral.com/journals/journalofexerciserehabilitation/rss",
-        "https://www.sciencedaily.com/rss/top/sports.xml"
+        "https://journals.plos.org/plosone/feed/atom?term=muscle+hypertrophy"
     ]
     
-    entries = []
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     
+    entries = []
     for url in rss_urls:
         try:
             res = requests.get(url, headers=headers, timeout=10)
             if res.status_code == 200:
                 feed = feedparser.parse(res.content)
-                if feed.entries:
-                    entries.extend(feed.entries)
-                    if len(entries) >= 5:
-                        break
+                for entry in feed.entries:
+                    title = entry.get('title', '')
+                    # 정정 기사(Correction), 편집 노트 등 무관한 논문 제외
+                    if not title.startswith("Correction:") and not title.startswith("Editorial Note:"):
+                        entries.append(entry)
         except Exception as e:
-            print(f"피드 에러 ({url}): {e}")
+            print(f"피드 에러: {e}")
 
     return entries[:5]
 
@@ -83,12 +73,13 @@ def build_summary_html(articles, owner, repo):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>오늘의 헬스 & 근성장 과학 요약</title>
     <style>
-        body {{ font-family: 'Apple SD Gothic Neo', sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: 0 auto; background-color: #f8f9fa; color: #333; }}
+        body {{ font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: 0 auto; background-color: #f8f9fa; color: #333; }}
         h1 {{ color: #0d6efd; border-bottom: 2px solid #0d6efd; padding-bottom: 10px; }}
         .card {{ background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
         .card h2 {{ color: #212529; font-size: 1.25rem; margin-top: 0; }}
         .summary {{ background: #e7f1ff; border-left: 4px solid #0d6efd; padding: 12px; margin: 15px 0; font-weight: 500; }}
-        .orig-link {{ color: #6c757d; font-size: 0.9rem; }}
+        .orig-link {{ color: #6c757d; font-size: 0.9rem; text-decoration: none; }}
+        .orig-link:hover {{ text-decoration: underline; }}
     </style>
 </head>
 <body>
@@ -99,10 +90,10 @@ def build_summary_html(articles, owner, repo):
     <div class="card" id="article-{i}">
         <h2>주제 {i}. {item['title']}</h2>
         <div class="summary">
-            💡 <b>핵심 요약:</b><br>{item['summary']}
+            💡 <b>핵심 쉬운 요약:</b><br>{item['summary']}
         </div>
         <p><b>원문 제목:</b> {item['orig_title']}</p>
-        <a class="orig-link" href="{item['link']}" target="_blank">🔗 원문 연구 자료 보기</a>
+        <a class="orig-link" href="{item['link']}" target="_blank">🔗 원문 연구 논문 보러가기</a>
     </div>
 """
     html_content += "</body></html>"
@@ -113,7 +104,7 @@ def build_summary_html(articles, owner, repo):
 def main():
     entries = fetch_hypertrophy_data()
     if not entries:
-        send_telegram_message("⚠️ 수집할 수 있는 최신 연구 데이터가 없습니다. 잠시 후 다시 시도해 주세요.")
+        send_telegram_message("⚠️ 수집할 수 있는 최신 연구 데이터가 없습니다.")
         return
 
     articles = []
