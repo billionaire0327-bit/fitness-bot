@@ -20,7 +20,6 @@ def send_telegram_message(text):
 def clean_text(html_text):
     if not html_text:
         return ""
-    # HTML 태그 및 특수문자 정리
     text = re.sub(r'<.*?>', '', html_text)
     text = text.replace('\n', ' ').strip()
     return text
@@ -29,52 +28,60 @@ def safe_translate(text):
     if not text:
         return ""
     try:
-        # 너무 긴 텍스트는 자른 후 번역
         truncated = text[:300]
         return GoogleTranslator(source='auto', target='ko').translate(truncated)
-    except Exception as e:
-        print(f"번역 오류 발생: {e}")
+    except Exception:
         return text[:100]
 
+def fetch_rss_content(url):
+    # 크롤링 차단을 방지하기 위한 브라우저 흉내 헤더
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        return feedparser.parse(response.content)
+    except Exception as e:
+        print(f"피드 로드 실패 ({url}): {e}")
+        return None
+
 def fetch_fitness_research():
-    # 1순위: ScienceDaily 운동 과학 연구 RSS
-    # 2순위: PubMed 근력 운동 검색 RSS
+    # 검증된 글로벌 학술/운동 과학 피드 목록
     rss_urls = [
-        "https://www.sciencedaily.com/rss/fitness.xml",
-        "https://pubmed.ncbi.nlm.nih.gov/rss/search/1wX3-m6E4C_pP9z5N-qXQ/?limit=10"
+        "https://www.biomedcentral.com/journals/journalofexerciserehabilitation/rss", # BMC 운동 재활 저널
+        "https://www.sciencedaily.com/rss/top/sports.xml",                           # ScienceDaily 스포츠 과학
+        "https://journals.plos.org/plosone/feed/atom?term=strength+training"          # PLOS ONE 근력 운동 연구
     ]
     
     entries = []
     for url in rss_urls:
-        feed = feedparser.parse(url)
-        if feed.entries:
+        feed = fetch_rss_content(url)
+        if feed and feed.entries:
             entries = feed.entries
             break
 
     if not entries:
-        return "⚠️ 최신 운동 연구 자료를 불러오는데 실패했습니다. 피드 주소를 확인해주세요."
+        return "⚠️ 모든 학술 피드 수집에 실패했습니다. 잠시 후 다시 시도해주세요."
 
     messages = ["🔬 **[과학 기반 헬스/근성장 최신 연구 요약]**\n"]
 
     count = 0
     for entry in entries:
-        if count >= 3:  # 상위 3개만 가져오기
+        if count >= 3:
             break
 
         title = entry.get('title', '제목 없음')
         link = entry.get('link', '')
         
-        # 요약 본문 가져오기 (summary 또는 description)
         summary_raw = entry.get('summary', entry.get('description', ''))
         cleaned_summary = clean_text(summary_raw)
 
-        # 한국어 번역
         ko_title = safe_translate(title)
         ko_summary = safe_translate(cleaned_summary) if cleaned_summary else "요약 본문이 제공되지 않는 논문입니다."
 
         card = (
-            f"📌 **{count+1}. {ko_title}**\n"
-            f"💡 **쉬운 요약:** {ko_summary}...\n"
+            f"📌 **{count+1}. {ko_title}**\n\n"
+            f"💡 **쉬운 요약:** {ko_summary}...\n\n"
             f"🔗 [원문/논문 보기]({link})"
         )
         messages.append(card)
