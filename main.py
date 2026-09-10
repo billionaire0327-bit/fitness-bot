@@ -17,52 +17,71 @@ def send_telegram_message(text):
     }
     requests.post(url, json=payload)
 
-def clean_html(raw_html):
-    # HTML 태그 제거
-    clean_text = re.sub(r'<.*?>', '', raw_html)
-    return clean_text.strip()
+def clean_text(html_text):
+    if not html_text:
+        return ""
+    # HTML 태그 및 특수문자 정리
+    text = re.sub(r'<.*?>', '', html_text)
+    text = text.replace('\n', ' ').strip()
+    return text
 
-def translate_and_summarize(text):
+def safe_translate(text):
+    if not text:
+        return ""
     try:
-        translated = GoogleTranslator(source='auto', target='ko').translate(text)
-        return translated
-    except Exception:
-        return text
+        # 너무 긴 텍스트는 자른 후 번역
+        truncated = text[:300]
+        return GoogleTranslator(source='auto', target='ko').translate(truncated)
+    except Exception as e:
+        print(f"번역 오류 발생: {e}")
+        return text[:100]
 
-def fetch_paper_data():
-    # PubMed 최신 근력 운동(Strength Training) 관련 논문 RSS
-    rss_url = "https://pubmed.ncbi.nlm.nih.gov/rss/search/1wX3-m6E4C_pP9z5N-qXQ/?limit=15"
-    feed = feedparser.parse(rss_url)
+def fetch_fitness_research():
+    # 1순위: ScienceDaily 운동 과학 연구 RSS
+    # 2순위: PubMed 근력 운동 검색 RSS
+    rss_urls = [
+        "https://www.sciencedaily.com/rss/fitness.xml",
+        "https://pubmed.ncbi.nlm.nih.gov/rss/search/1wX3-m6E4C_pP9z5N-qXQ/?limit=10"
+    ]
     
-    # 만약 위 RSS에 데이터가 없을 경우 대체할 과학 기반 헬스 아티클 RSS
-    if not feed.entries:
-        rss_url = "https://www.sciencedaily.com/rss/fitness.xml"
-        feed = feedparser.parse(rss_url)
+    entries = []
+    for url in rss_urls:
+        feed = feedparser.parse(url)
+        if feed.entries:
+            entries = feed.entries
+            break
 
-    messages = ["🔬 **[과학 기반 헬스/근성장 최신 논문 요약]**\n"]
-    
-    # 최신 3개 논문/아티클 가공
-    for i, entry in enumerate(feed.entries[:3], 1):
-        title = entry.title
-        link = entry.link
+    if not entries:
+        return "⚠️ 최신 운동 연구 자료를 불러오는데 실패했습니다. 피드 주소를 확인해주세요."
+
+    messages = ["🔬 **[과학 기반 헬스/근성장 최신 연구 요약]**\n"]
+
+    count = 0
+    for entry in entries:
+        if count >= 3:  # 상위 3개만 가져오기
+            break
+
+        title = entry.get('title', '제목 없음')
+        link = entry.get('link', '')
         
-        # 초록(Abstract) 또는 요약문 가져오기
-        raw_summary = entry.get('summary', entry.get('description', ''))
-        clean_summary = clean_html(raw_summary)[:250] # 너무 길지 않게 자르기
-        
-        # 한글 번역
-        ko_title = translate_and_summarize(title)
-        ko_summary = translate_and_summarize(clean_summary) if clean_summary else "요약 내용 없음"
-        
-        message_block = (
-            f"📌 **{i}. {ko_title}**\n\n"
+        # 요약 본문 가져오기 (summary 또는 description)
+        summary_raw = entry.get('summary', entry.get('description', ''))
+        cleaned_summary = clean_text(summary_raw)
+
+        # 한국어 번역
+        ko_title = safe_translate(title)
+        ko_summary = safe_translate(cleaned_summary) if cleaned_summary else "요약 본문이 제공되지 않는 논문입니다."
+
+        card = (
+            f"📌 **{count+1}. {ko_title}**\n"
             f"💡 **쉬운 요약:** {ko_summary}...\n"
-            f"🔗 [논문/원문 보기]({link})\n"
+            f"🔗 [원문/논문 보기]({link})"
         )
-        messages.append(message_block)
-        
-    return "\n-------------------\n".join(messages)
+        messages.append(card)
+        count += 1
+
+    return "\n\n-------------------\n\n".join(messages)
 
 if __name__ == "__main__":
-    content = fetch_paper_data()
+    content = fetch_fitness_research()
     send_telegram_message(content)
