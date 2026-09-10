@@ -25,10 +25,9 @@ def clean_text(html_text):
     return text
 
 def safe_translate(text):
-    if not text or "Error 500" in text:
+    if not text:
         return "제목 정보 없음"
     
-    # 구글 번역 웹 API 직접 요청 (Error 500 방지)
     try:
         url = "https://translate.googleapis.com/translate_a/single"
         params = {
@@ -42,22 +41,25 @@ def safe_translate(text):
         if res.status_code == 200:
             result = res.json()
             translated = "".join([item[0] for item in result[0] if item[0]])
-            if "Error 500" not in translated:
+            if "Error" not in translated:
                 return translated
-    except Exception as e:
-        print(f"번역 실패: {e}")
+    except Exception:
+        pass
         
-    return text[:100] # 번역 실패 시 원문 출력
+    return text[:100]
 
 def fetch_hypertrophy_data():
-    # 검증된 스포츠/헬스 과학 RSS
+    # 차단 위험이 낮고 안정한 글로벌 근력/운동 연구 RSS 피드
     rss_urls = [
-        "https://www.sciencedaily.com/rss/top/sports.xml",
-        "https://www.sciencedaily.com/rss/fitness.xml"
+        "https://journals.plos.org/plosone/feed/atom?term=resistance+training",
+        "https://www.biomedcentral.com/journals/journalofexerciserehabilitation/rss",
+        "https://www.sciencedaily.com/rss/top/sports.xml"
     ]
     
     entries = []
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
     
     for url in rss_urls:
         try:
@@ -66,17 +68,12 @@ def fetch_hypertrophy_data():
                 feed = feedparser.parse(res.content)
                 if feed.entries:
                     entries.extend(feed.entries)
+                    if len(entries) >= 5:
+                        break
         except Exception as e:
-            print(f"피드 에러: {e}")
+            print(f"피드 에러 ({url}): {e}")
 
-    # 에러 문구 필터링 및 정제
-    valid_entries = []
-    for entry in entries:
-        title = entry.get('title', '')
-        if title and "Error 500" not in title and "Server Error" not in title:
-            valid_entries.append(entry)
-
-    return valid_entries[:5]
+    return entries[:5]
 
 def build_summary_html(articles, owner, repo):
     html_content = f"""<!DOCTYPE html>
@@ -116,7 +113,7 @@ def build_summary_html(articles, owner, repo):
 def main():
     entries = fetch_hypertrophy_data()
     if not entries:
-        send_telegram_message("⚠️ 최신 헬스 소식을 가져오는 중입니다. 잠시 후 시도해주세요.")
+        send_telegram_message("⚠️ 수집할 수 있는 최신 연구 데이터가 없습니다. 잠시 후 다시 시도해 주세요.")
         return
 
     articles = []
@@ -126,7 +123,7 @@ def main():
         cleaned = clean_text(summary_raw)
         
         ko_title = safe_translate(title)
-        ko_summary = safe_translate(cleaned) if cleaned else "요약 본문이 제공되지 않는 정보입니다."
+        ko_summary = safe_translate(cleaned) if cleaned else "상세 요약 본문이 제공되지 않는 논문입니다."
         
         articles.append({
             'title': ko_title,
